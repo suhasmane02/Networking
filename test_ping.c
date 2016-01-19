@@ -7,6 +7,16 @@
 #include <string.h>
 #include "test.h"
 
+/*
+  Sample application which sends layer 2 echo request 
+  and receives the same as echo reply.
+  This send echo request from user space to kernel module using ioctl.
+  And kernel module sends it to target machine of-course within LAN.
+  pass command line parameters as:
+  ./test 10 "testing layer 2 ping"
+   10 is packet count
+   and double quote string is echo string.
+*/
 int main(int argc, char *argv[])
 {
 	str_test test_data;
@@ -19,8 +29,10 @@ int main(int argc, char *argv[])
 	int len = 100;
 	int i32Read = 0;
 
+	/* number of echo requests to send */
 	count = atoi(argv[1]);
 
+	/* get the major number to create character special file */
 	system("cat /proc/devices | grep test_dev | cut -d\" \" -f 1 > test.txt");
 
 	fd1 = open("test.txt", O_RDONLY, S_IRUSR);
@@ -45,30 +57,30 @@ int main(int argc, char *argv[])
 	close(fd1);
 	unlink("test.txt");
 
+	/* open TEST_DEV */
 	if((fd2 = open(TEST_DEV, O_RDWR)) < 0) {
 		printf("open failed\n");
 		return -1;
 	}
 
+	/* copy echo buffer to temporary buffer */
 	memset(temp_buf, 0, 100);
 	strncpy(temp_buf, argv[2], strlen(argv[2]));
-
-	memset(&test_data, 0, sizeof(str_test));
-	test_data.count = count;
-	test_data.type = ECHO_REQ;
-	memcpy(&test_data.data, argv[2], strlen(argv[2])%100);
 
 	while(count--) {
 		memset(&test_data, 0, sizeof(str_test));
 		test_data.count = count;
 		test_data.type = ECHO_REQ;
-		strncpy(test_data.data, temp_buf, strlen(argv[2])%100);
+		strncpy(test_data.data, temp_buf, strlen(temp_buf));
 
+		/* send echo request */
 		if(ioctl(fd2, WRITE_IOCTL, &test_data) < 0)
 			perror("write ioctl");
 		printf("sending 100 bytes | count = %d\n", test_data.count);
 
 		sleep(2);
+
+		/* receive echo reply */
 		memset(&test_data, 0, sizeof(str_test));
 		if(ioctl(fd2, READ_IOCTL, &test_data) < 0)
 			perror("read ioctl");

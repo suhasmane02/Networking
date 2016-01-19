@@ -1,3 +1,9 @@
+/*
+	Sample test driver.
+	This sends layer 2 ECHO_REQ
+	And recdeives ECHO_REPLY
+*/
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
@@ -15,27 +21,44 @@ static int process_data(struct sk_buff *skb);
 static int major;
 static struct sk_buff_head skb_q;
 
+/* send data to NIC driver */
 static int send_test(str_test *ptest_data)
 {
 	struct sk_buff *skb;
+	/* destination mac hard coded for now
+	   sender should put receivers MAC, and  receiver should put 
+	   senders MAC 
+	ToDO: get the destination MAC from user space.
+	 */
 	const unsigned char dest_hw[6] = {0x08,0x00,0x27,0x31,0x38,0xb0};
-//	const unsigned char dest_hw[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+	/* const unsigned char dest_hw[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};*/
 	const unsigned char *src_hw = NULL;
 	struct net_device *dev;
 	int hlen; 
 	int tlen; 
 	unsigned char *data;
 
+	/* get device by index, every NIC interface is identified with an index
+	   can be found in /sys/class/net/<interface_name>/ifindex
+	ToDO: From user space, get the network interface name on which to send 
+	packet.
+	 */
 	dev = dev_get_by_index(&init_net, 2);
 	if(dev == NULL)
+	{
+		printk("failed to get device at index 2\n");
 		return -1;
+	}
 
 	hlen = LL_RESERVED_SPACE(dev);
 	tlen = dev->needed_tailroom;
 
 	skb = alloc_skb(hlen + tlen, GFP_ATOMIC);
 	if (!skb)
+	{
+		printk("skb allocation failed\n");
 		return -2;
+	}
 
 	skb->dev = dev;
 	skb_reserve(skb, hlen);
@@ -48,7 +71,7 @@ static int send_test(str_test *ptest_data)
 
 	data = skb_put(skb, sizeof(str_test));
 
-//	printk("ptest_data count = %d\ntype = %d\ndata=%s\n", ptest_data->count, ptest_data->type, ptest_data->data);
+	/*	printk("ptest_data count = %d\ntype = %d\ndata=%s\n", ptest_data->count, ptest_data->type, ptest_data->data);*/
 	memcpy(data, ptest_data, sizeof(str_test));
 
 	if (dev_hard_header(skb, dev, ETH_P_TEST, dest_hw, src_hw, skb->len) < 0)
@@ -61,10 +84,12 @@ out:
 	return 0;
 }
 
+/* process the received data */
 static int process_data(struct sk_buff *skb)
 {
 	str_test *ptemp_test = (str_test *)skb->data;
 	str_test temp_test;
+	/* if echo request(ECHO_REQ) received. Then revert the same (ECHO_REPLY) */
 	if(ptemp_test->type == ECHO_REQ)
 	{
 		memset(&temp_test, 0, sizeof(str_test));
@@ -73,25 +98,22 @@ static int process_data(struct sk_buff *skb)
 		temp_test.type = ECHO_REPLY;
 		send_test(&temp_test);
 	}
-	else
+	else /* otherwise queue it, so that user space app will consume it */
 	{
 		skb_queue_tail(&skb_q, skb);
 	}
-	
+
 	return 0;
 }
-
+/* Receive callback, called by netif_recv_skb() if protocol is ETH_P_TEST */
 static int test_rcv(struct sk_buff *skb, struct net_device *dev,
 		struct packet_type *pt, struct net_device *orig_dev)
 {
 	str_test* test_data;
 	printk("skb->proto = %02x\n", ntohs(skb->protocol));
-	/* memcpy(&test_data, skb->data, sizeof(str_test)); */
 	test_data = (str_test *)skb->data;
 	printk("count = %d\ntype = %d\ndata = %s\n", test_data->count, test_data->type, test_data->data);
-	/*	value = test_data->count;
-		kfree(skb);
-		send_test(value); */
+	/* process received data, put it in queue or revert with echo_reply */
 	process_data(skb);
 	return 0;
 }
